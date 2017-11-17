@@ -5,10 +5,13 @@
 #include <cmath>
 #include <stdlib.h>
 #include <stdio.h>
+#include<algorithm>
+#include "lib.h"
 #define EPS    3.0e-14
 #define MAXIT  10
 #define ZERO   1.0E-10
-#define PI     3.14159265358979324E+00    
+#define PI     3.14159265358979324E+00
+#define HBARC	197.0		// hbarc = 197 MeV fm	    
 using namespace std;
 
 /*
@@ -97,17 +100,100 @@ void GaussLegendreQuadrature(double x1, double x2, double x[], double w[], int n
 
 */
 
-double V (double k1, double k2, double V0, double mu) {
+double V (double k1, double k2) {
 
+	double mu = 137.0;	// Pion Mass in MeV
+   double a = 1.0*mu;
+   double Va = -10.463;
+   double b = 4.0*mu;
+   double Vb = -1650.6;
+   double c = 7.0*mu;
+   double Vc = 6484.3;
+
+   double Vsum = 0.0;
+
+   double k1k2p,k1k2m;
    double factor, num, denom;
 
-   factor = V0/(4.0*k1*k2); 
-   num = (k1 + k2)*(k1 + k2) + mu*mu;
-   denom = (k1 - k2)*(k1 - k2) + mu*mu;
+   k1k2p = (k1 + k2)*(k1 + k2);
+   k1k2m = (k1 - k2)*(k1 - k2);   
+   factor = 1.0/(4.0*mu*k1*k2);
 
-   return factor*log(num/denom);
+   Vsum += Va*factor*log((k1k2p + a*a)/(k1k2m + a*a));
+   Vsum += Vb*factor*log((k1k2p + b*b)/(k1k2m + b*b));
+   Vsum += Vc*factor*log((k1k2p + c*c)/(k1k2m + c*c));
+
+   return Vsum;
 }
 
+/*
+
+	Function for computing the inverse of a matrix
+
+*/
+
+void inverse(double **a, int n) {        
+  int          i,j, *indx;
+  double       d, *col, **y;
+
+  // allocate space in memory
+  indx = new int[n];
+  col  = new double[n];
+  y    = (double **) matrix(n, n, sizeof(double)); 
+   
+  ludcmp(a, n, indx, &d);   // LU decompose  a[][] 
+
+  // find inverse of a[][] by columns 
+
+  for(j = 0; j < n; j++) {
+
+    // initialize right-side of linear equations 
+
+    for(i = 0; i < n; i++) col[i] = 0.0;
+    col[j] = 1.0;
+
+    lubksb(a, n, indx, col);
+
+    // save result in y[][] 
+
+    for(i = 0; i < n; i++) y[i][j] = col[i];
+
+  }   //j-loop over columns 
+   
+  // return the inverse matrix in a[][] 
+
+  for(i = 0; i < n; i++) {
+    for(j = 0; j < n; j++) a[i][j] = y[i][j];
+  } 
+  free_matrix((void **) y);     // release local memory 
+  delete [] col;
+  delete []indx;
+
+}
+
+/*
+
+	Function for multiplying two matricies
+
+*/
+
+void matmul (double** A, double** B, double** C, int N) {
+
+	int i,j,k;
+	double sum;
+
+	for (i = 0; i<N; i++) {
+		for (j = 0; j<N; j++) {
+			sum = 0.0;
+			for(k = 0; k<N; k++) {
+				sum += A[i][k]*B[k][j];
+			}
+			C[i][j] = sum;
+		}
+	}
+
+	return;
+}
 
 /*
 
@@ -119,33 +205,44 @@ int main () {
 
       // Define any necessary variables
 
-      int N = 10;
+      int N = 100;
 
       double k0,k02;
-      int k0Points = 10;
-      double k0Start = 1.0E-03;
-      double k0Step = 1.0E-03;
+      int EPoints = 70;
+		double Emax = 350.0;
+		double Emin = 0.0;
+		double EStep = (Emax-Emin)/EPoints;
 
       int i,j,k;
-      double temp1,temp2;
+      double temp1,temp2,temp_sum;
 
       double x1,x2;     // Variables for the integration in position space.
       double x[N];
       double w[N];
 
-      double kMesh[N];      // Variable for the integration in momentum space.
+      double kMesh[N+1];      // Variable for the integration in momentum space.
       double kWeights[N];
+		double kMax,kMin;
 
       double k1,k2;
-      double const meshConst = 200.0; // Using MeV as the unit.
-      double const V0 = 1.0;
-      double const mN = 939.0;
-      double const mu = mN/2.0;
+      double const meshConst = HBARC; // Using MeV as the unit.
+      double const mN = 939;
 
       double u[N+1];
-      double Vk[N+1][N+1];
-      double A[N+1][N+1];
-      double R[N+1][N+1];
+      double** Vk;
+      double** A;
+		double** AInv;
+		double** eye;
+      double** R;
+
+		A = (double **) matrix(N+1,N+1,sizeof(double));
+		AInv = (double **) matrix(N+1,N+1,sizeof(double));
+		eye = (double **) matrix(N+1,N+1,sizeof(double));
+		Vk = (double **) matrix(N+1,N+1,sizeof(double));
+		R = (double **) matrix(N+1,N+1,sizeof(double));
+
+		double phase;
+		double energy;
 
       bool printArrays = false;
 
@@ -154,66 +251,81 @@ int main () {
       for (i = 0; i<N; i++) {
          x[i] = 0.0;
          w[i] = 0.0;
-         kMesh[i] = 0.0;
          kWeights[i] = 0.0;
       }
       for (i = 0; i<N+1; i++) {
+         kMesh[i] = 0.0;
          u[i] = 0.0;
          for (j = 0; j<N+1; j++) {
             Vk[i][j] = 0.0;
             A[i][j] = 0.0;
-            R[i][j] = 0.012345;
+            R[i][j] = 0.0;
          }
       }
 
+		ofstream fout("data.txt");
+		ofstream fvout("potential.txt");
+
+      // Call GaussLegendreQuadrature to get x[] and w[]
+
+      GaussLegendreQuadrature(-1.0,1.0,x,w,N);
+
+      if (printArrays) {
+         cout<<"Mesh points & weights in Position Space"<<"\n";
+         for (i = 0; i<N; i++) {
+            cout<<i<<"\t"<<x[i]<<"\t"<<w[i]<<"\n";
+         }
+         cout<<"\n";
+      }
+
+      // Convert mesh points to momentum space
+
+      for (i = 0; i<N; i++) {
+         temp1 = (PI/4.0)*(1.0 + x[i]);
+			temp2 = 4.0*cos(temp1)*cos(temp1);
+         kMesh[i] = meshConst*tan(temp1);
+         kWeights[i] = meshConst*(PI/4.0)*(w[i]/temp2);
+      }
+
+      if (printArrays) {
+         cout<<"Mesh points & weights in Momentum Space"<<"\n";
+         for (i = 0; i<N; i++) {
+            cout<<i<<"\t"<<kMesh[i]<<"\t"<<kWeights[i]<<"\n";
+         }
+         cout<<"\n";
+      }
+
+		kMin = *std::min_element(kMesh,kMesh+N);
+		kMax = *std::max_element(kMesh,kMesh+N);
+
+		cout<<"Smallest K Mesh Point: "<<kMin<<"\n";
+		cout<<"Largest K Mesh Point: "<<kMax<<"\n";
+
       // Global loop over k0
 
-      cout<<" k0 "<<"\t"<<" R(k0,k0) "<<"\n";
+      cout<<" E (MeV) "<<"\t"<<" Delta (Deg) "<<"\n";
 
-      for (k = 0; k<k0Points; k++) {
+      for (k = 0; k<EPoints; k++) {
 
-         k0 = k0Start + k0Step*k;
-         k02 = k0*k0;
-   
-         // Call GaussLegendreQuadrature to get x[] and w[]
-
-         GaussLegendreQuadrature(1.0,-1.0,x,w,N);
-
-         if (printArrays) {
-            cout<<"Mesh points & weights in Position Space"<<"\n";
-            for (i = 0; i<N; i++) {
-               cout<<i<<"\t"<<x[i]<<"\t"<<w[i]<<"\n";
-            }
-            cout<<"\n";
-         }
-
-         // Convert mesh points to momentum space
-
-         for (i = 0; i<N; i++) {
-            temp1 = (PI/4.0)*(1.0 + x[i]);
-            kMesh[i] = meshConst*tan(temp1);
-            kWeights[i] = meshConst*(PI/4.0)*(w[i]/(4.0*cos(temp1)*cos(temp1)));
-         }
-
-         if (printArrays) {
-            cout<<"Mesh points & weights in Momentum Space"<<"\n";
-            for (i = 0; i<N; i++) {
-               cout<<i<<"\t"<<kMesh[i]<<"\t"<<kWeights[i]<<"\n";
-            }
-            cout<<"\n";
-         }
+         energy = (k+1)*EStep;
+         k02 = energy*mN;
+			k0 = sqrt(k02);
+			kMesh[N] = k0;
 
          // Using these weights and mesh points, construct u[j] and Vk[i][j]
 
          for (i = 0; i<N; i++) {
             temp1 = kMesh[i]*kMesh[i];
-            u[i] = (2.0/PI)*((kWeights[i]*temp1)/((k02-temp1)/mN));
+				temp2 = (k02-temp1)/mN;
+            u[i] = (2.0/PI)*((kWeights[i]*temp1)/temp2);
          }
-         temp2 = 0.0;
+         temp_sum = 0.0;
          for (i = 0; i<N; i++) {
-            temp2 += (k02*kWeights[i])/((k02-temp1)/mN);
+				temp1 = kMesh[i]*kMesh[i];
+				temp2 = (k02-temp1)/mN;
+            temp_sum += (k02*kWeights[i])/temp2;
          }
-         u[N] = (-2.0/PI)*temp2;
+         u[N] = (-2.0/PI)*temp_sum;
 
          if (printArrays) {
             cout<<"U Array"<<"\n";
@@ -224,36 +336,25 @@ int main () {
          }
       
          for (i = 0; i<N+1; i++) {
-            if (i == N) {k1 = k0;} 
-            else {k1 = kMesh[i];}
-
+				k1 = kMesh[i];
             for (j = 0; j<N+1; j++) {
-               if (j == N) {k2 = k0;} 
-               else {k2 = kMesh[j];}
-
-               Vk[i][j] = V(k1,k2,V0,mu);
-
+					k2 = kMesh[j];
+               Vk[i][j] = V(k1,k2);
             }
          }
-      
+
          if (printArrays) {
-            cout<<"V Matrix"<<"\n";
-            for (i = 0; i<N+1; i++) {
-               for (j = 0; j<N+1; j++) {
-                  cout<<i<<"\t"<<j<<"\t"<<Vk[i][j]<<"\n";
-               }
-            }
-            cout<<"\n";
-         }
+         	for (i = 0; i<N+1; i++) {
+           		for (j = 0; j<N+1; j++) {
+               	fvout<<i<<"\t"<<j<<"\t"<<Vk[i][j]<<"\n";
+            	}
+         	}
+			}
 
          // Using u[], construct the A matrix
 
          for (i = 0; i<N+1; i++) {
-            if (i == N) {k1 = k0;} 
-            else {k1 = kMesh[i];}
             for (j = 0; j<N+1; j++) {
-               if (i == N) {k1 = k0;} 
-               else {k1 = kMesh[i];}
                A[i][j] = kron(i,j) - Vk[i][j]*u[j];
             }
          }
@@ -268,19 +369,44 @@ int main () {
             cout<<"\n";
          }
 
+			AInv = A;
+
          // Compute the R-matrix by R = A^-1 * V
 
+			inverse(AInv,N+1);
 
+         if (printArrays) {
+            cout<<"A Inverse"<<"\n";
+            for (i = 0; i<N+1; i++) {
+               for (j = 0; j<N+1; j++) {
+                  cout<<i<<"\t"<<j<<"\t"<<AInv[i][j]<<"\n";
+               }
+            }
+            cout<<"\n";
+         }
 
+			matmul(AInv,A,eye,N+1);
 
+         if (printArrays) {
+            cout<<"A^-1 A = I"<<"\n";
+            for (i = 0; i<N+1; i++) {
+               for (j = 0; j<N+1; j++) {
+                  cout<<i<<"\t"<<j<<"\t"<<eye[i][j]<<"\n";
+               }
+            }
+            cout<<"\n";
+         }
 
+			matmul(AInv,Vk,R,N+1);
 
+			//  Compute the phase shift for this particular k0 (or Energy)
 
+			phase = (180/PI)*atan(-mN*k0*R[N][N]);
 
+         // Print out the values
 
-         // Print out the value of R(N+1,N+1) as R(k0,k0)
-
-         cout<<" "<<k0<<"\t"<<R[N][N]<<"\n";
+         cout<<" "<<energy<<"\t"<<phase<<"\n";
+			fout<<" "<<energy<<"\t"<<phase<<"\n";
 
 
       }
