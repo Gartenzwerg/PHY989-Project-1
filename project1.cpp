@@ -284,7 +284,7 @@ int main () {
          temp1 = (PI/4.0)*(1.0 + x[i]);
 			temp2 = 4.0*cos(temp1)*cos(temp1);
          kMesh[i] = meshConst*tan(temp1);
-         kWeights[i] = meshConst*(PI/4.0)*(w[i]/temp2);
+         kWeights[i] = meshConst*(PI)*(w[i]/temp2);
       }
 
       if (printArrays) {
